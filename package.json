@@ -1,0 +1,29 @@
+{
+  "name": "@tokenring-ai/newsletter",
+  "version": "0.2.0",
+  "description": "A provider-based newsletter abstraction for Token Ring",
+  "dependencies": {
+    "@tokenring-ai/agent": "workspace:*",
+    "@tokenring-ai/app": "workspace:*",
+    "@tokenring-ai/chat": "workspace:*",
+    "@tokenring-ai/rpc": "workspace:*",
+    "@tokenring-ai/utility": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./frontend/*": "./frontend/*",
+    "./*": "./*.ts"
+  },
+  "license": "MIT",
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "test": "bun test",
+    "build": "tsc --noEmit",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage"
+  }
+}
