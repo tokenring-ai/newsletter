@@ -23,7 +23,7 @@ async function execute({ id, subject, preheader, contentInMarkdown, audience }: 
   if (Object.keys(update).length === 0) throw new ToolCallError(name, "Nothing to change: pass a subject, preheader, content or audience.");
 
   // Changing a scheduled issue changes what people will be emailed later, with no one looking again.
-  if (issue.status === "scheduled") await requireScheduledEditApproval(agent, { toolName: name, active, issue });
+  if (issue.status === "scheduled") await requireScheduledEditApproval(agent, { toolName: name, active, issue, update });
 
   const updated = await active.provider.updateIssue(id, update);
   return { message: `**Newsletter** Updated "${updated.subject}"`, result: JSON.stringify(updated) };

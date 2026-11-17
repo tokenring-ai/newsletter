@@ -1,6 +1,7 @@
 import type Agent from "@tokenring-ai/agent/Agent";
 import type { TokenRingToolDefinition, TokenRingToolResult } from "@tokenring-ai/chat/schema";
 import { ToolCallError } from "@tokenring-ai/chat/util/tokenRingTool";
+import { parseAt } from "@tokenring-ai/scheduler/utility/getNextRunTime";
 import { z } from "zod";
 import { requireActive, requireContent, requireDeliveryApproval, requireIssue, requireUnchangedSince, resolveAudience } from "./support.ts";
 
@@ -16,8 +17,10 @@ async function execute({ id, sendAt, audience: requestedAudience }: z.output<typ
   if (issue.status === "scheduled" && issue.scheduledAt !== undefined && issue.scheduledAt <= Date.now()) {
     throw new ToolCallError(name, `"${issue.subject}" is already going out (its scheduled time has passed).`);
   }
-  const at = Date.parse(sendAt);
-  if (Number.isNaN(at)) throw new ToolCallError(name, `"${sendAt}" is not a date and time. Use ISO 8601, for example 2026-11-20T09:00:00-05:00.`);
+  const at = parseAt(sendAt);
+  if (at === null) {
+    throw new ToolCallError(name, `"${sendAt}" is not a real date and time with a Z or UTC offset. Use ISO 8601, for example 2026-11-20T09:00:00-05:00.`);
+  }
   if (at <= Date.now()) throw new ToolCallError(name, "The send time must be in the future.");
   requireContent(name, issue);
   const audience = await resolveAudience(name, active, issue, requestedAudience);

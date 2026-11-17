@@ -13,6 +13,8 @@ import type {
 export default class TestNewsletterProvider implements NewsletterProvider {
   description = "Test newsletters";
   supportedStatuses: Issue["status"][] = ["draft", "scheduled", "sent"];
+  /** Whether delivering also publishes on a website. */
+  publishesOnWebsite: boolean | undefined = true;
   newsletters: Newsletter[] = [{ id: "weekly", name: "The Weekly" }];
   audiences: Audience[] = [
     { id: "all", name: "Everyone subscribed", memberCount: 1204 },

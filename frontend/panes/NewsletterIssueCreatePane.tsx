@@ -1,4 +1,5 @@
 import EmptyState from "@tokenring-ai/one-frontend/components/ui/EmptyState.tsx";
+import ErrorState from "@tokenring-ai/one-frontend/components/ui/ErrorState.tsx";
 import LoadingState from "@tokenring-ai/one-frontend/components/ui/LoadingState.tsx";
 import { usePanel } from "@tokenring-ai/one-frontend/layout/hooks.ts";
 import { Mail } from "lucide-react";
@@ -10,10 +11,11 @@ import { useNewsletterNavigation } from "../lib/useNewsletterNavigation.ts";
 /** New draft (`/newsletter/new`). Saving closes this tab and opens the issue it created. */
 export default function NewsletterIssueCreatePane() {
   const panel = usePanel();
-  const { provider, newsletter, isLoading } = useNewsletterSelection();
+  const { provider, newsletter, isLoading, error, refresh } = useNewsletterSelection();
   const { openIssue } = useNewsletterNavigation();
 
   if (isLoading) return <LoadingState message="Loading…" />;
+  if (error) return <ErrorState variant="page" title="Newsletters could not be loaded" error={error} onRetry={refresh} />;
   if (!provider || !newsletter) {
     return <EmptyState variant="page" className="h-full bg-primary" icon={Mail} title="No newsletter connected" hint={<NewsletterSetupHint />} />;
   }

@@ -101,6 +101,12 @@ export interface NewsletterProvider {
   /** Statuses the provider can hold. A provider that cannot schedule leaves `scheduled` out. */
   supportedStatuses: readonly IssueStatus[];
 
+  /**
+   * Whether sending or scheduling an issue also publishes it on a public website (Ghost does, unless it is
+   * configured email-only). Undefined: the provider has no website, or cannot say. Shown in approval prompts.
+   */
+  readonly publishesOnWebsite?: boolean | undefined;
+
   listNewsletters(): Promise<Newsletter[]>;
 
   listAudiences(newsletter: string): Promise<Audience[]>;

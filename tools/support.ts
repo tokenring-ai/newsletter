@@ -3,7 +3,7 @@ import { permissionSlug } from "@tokenring-ai/chat";
 import { ApprovalLevel } from "@tokenring-ai/chat/schema";
 import { requireToolApproval } from "@tokenring-ai/chat/util/requireToolApproval";
 import { ToolCallError } from "@tokenring-ai/chat/util/tokenRingTool";
-import type { Audience, Issue } from "../NewsletterProvider.ts";
+import type { Audience, Issue, UpdateIssueData } from "../NewsletterProvider.ts";
 import NewsletterService, { type ActiveNewsletter } from "../NewsletterService.ts";
 
 /** Strips the leading heading from a Markdown body: the subject is its own field. */
@@ -58,6 +58,44 @@ export function describeRecipients(count: number | undefined): string {
     : `This will email about ${count.toLocaleString("en-US")} ${count === 1 ? "person" : "people"}`;
 }
 
+const EXCERPT_LENGTH = 300;
+
+/** The body as plain text for an approval prompt: Markdown and HTML marks removed, whitespace collapsed, cut with "…". */
+export function plainExcerpt(markdown: string, max = EXCERPT_LENGTH): string {
+  const text = markdown
+    .replace(/<[^>]*>/g, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
+    .replace(/(\*\*|__|\*|_|`+|~~)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = [...text];
+  return chars.length > max ? `${chars.slice(0, max).join("").trimEnd()}…` : text;
+}
+
+/** What the person is approving to be emailed: the preheader and the start of the body. */
+function describeContent(issue: { preheader?: string | undefined; markdown: string }): string {
+  const body = plainExcerpt(issue.markdown);
+  return `Preheader: ${issue.preheader?.trim() || "(none)"}\nBody starts: ${body || "(empty)"}`;
+}
+
+/** Whether delivering also puts the issue on a public website, in words. */
+export function describeWebsite(active: ActiveNewsletter): string {
+  const publishes = active.provider.publishesOnWebsite;
+  if (publishes === true) return "It will ALSO be published on the website, where anyone can read it (not only emailed)";
+  if (publishes === false) return "It will be emailed only; it will NOT be published on the website";
+  return `Whether ${active.providerName} also publishes it on a website is not known, so check before approving`;
+}
+
+async function audienceCount(active: ActiveNewsletter, audience: Audience): Promise<number | undefined> {
+  try {
+    return (await active.provider.getAudienceSize(active.newsletter.id, audience.id)) ?? audience.memberCount;
+  } catch {
+    return audience.memberCount;
+  }
+}
+
 /**
  * Asks for approval to email an issue. Level 8, so it always asks unless a standing permission matches.
  * The prompt names the subject, the audience and how many people will get it.
@@ -67,20 +105,15 @@ export async function requireDeliveryApproval(
   options: { toolName: string; active: ActiveNewsletter; issue: Issue; audience: Audience; at?: number },
 ): Promise<void> {
   const { toolName, active, issue, audience, at } = options;
-  let count: number | undefined;
-  try {
-    count = (await active.provider.getAudienceSize(active.newsletter.id, audience.id)) ?? audience.memberCount;
-  } catch {
-    count = audience.memberCount;
-  }
+  const count = await audienceCount(active, audience);
   const where = `${active.newsletter.name}, to ${audience.name}`;
   const when = at === undefined ? "now" : `at ${new Date(at).toISOString()}`;
   await requireToolApproval(agent, {
     toolName,
-    message: `${at === undefined ? "Send" : "Schedule"} "${issue.subject}" from ${where}${at === undefined ? "" : ` for ${when}`}? ${describeRecipients(count)}.`,
+    message: `${at === undefined ? "Send" : "Schedule"} "${issue.subject}" from ${where}${at === undefined ? "" : ` for ${when}`}? ${describeRecipients(count)}. ${describeWebsite(active)}.`,
     detailedDescription:
       `Emails the issue "${issue.subject}" of ${active.newsletter.name} (${active.providerName}) to ${audience.name} ${when}. ${describeRecipients(count)}. ` +
-      "A sent email cannot be recalled or edited.",
+      `${describeWebsite(active)}. A sent email cannot be recalled or edited.\n${describeContent(issue)}`,
     // Email reaches people and cannot be taken back.
     safetyLevel: ApprovalLevel.ReachesPeople,
     default: false,
@@ -99,13 +132,40 @@ export async function requireUnchangedSince(toolName: string, active: ActiveNews
   }
 }
 
-/** Editing a scheduled issue changes what will be emailed later. Same level and permission as scheduling it. */
-export async function requireScheduledEditApproval(agent: Agent, options: { toolName: string; active: ActiveNewsletter; issue: Issue }): Promise<void> {
-  const { toolName, active, issue } = options;
+/** The names of the fields an update changes, as people read them. */
+function changedFields(update: UpdateIssueData): string[] {
+  const names: [keyof UpdateIssueData, string][] = [
+    ["subject", "subject"],
+    ["preheader", "preheader"],
+    ["markdown", "body"],
+    ["audience", "audience"],
+  ];
+  return names.filter(([key]) => update[key] !== undefined).map(([, label]) => label);
+}
+
+/**
+ * Editing a scheduled issue changes what will be emailed later. Same level and permission as scheduling it. The prompt
+ * names what changes, who will get it (the audience it is scheduled for, or the new one) and when it goes out.
+ */
+export async function requireScheduledEditApproval(
+  agent: Agent,
+  options: { toolName: string; active: ActiveNewsletter; issue: Issue; update: UpdateIssueData },
+): Promise<void> {
+  const { toolName, active, issue, update } = options;
+  const audienceId = update.audience ?? issue.audience;
+  const audiences = audienceId ? await active.provider.listAudiences(active.newsletter.id).catch(() => []) : [];
+  const audience = audienceId ? (audiences.find(candidate => candidate.id === audienceId) ?? { id: audienceId, name: audienceId }) : undefined;
+  const count = audience ? await audienceCount(active, audience) : undefined;
+  const when = issue.scheduledAt ? `at ${new Date(issue.scheduledAt).toISOString()}` : "later";
+  const changes = changedFields(update).join(", ");
+  const whoLine = audience ? `Audience: ${audience.name}. ${describeRecipients(count)}.` : "The audience is not recorded, so I cannot say who will receive it.";
+  const after = { preheader: update.preheader ?? issue.preheader, markdown: update.markdown ?? issue.markdown };
   await requireToolApproval(agent, {
     toolName,
-    message: `Change the scheduled issue "${issue.subject}" of ${active.newsletter.name}? It is due to be emailed ${issue.scheduledAt ? `at ${new Date(issue.scheduledAt).toISOString()}` : "later"}.`,
-    detailedDescription: "The change goes out in the email at the scheduled time, to whoever the issue is scheduled for, without anyone being asked again.",
+    message: `Change the ${changes} of the scheduled issue "${issue.subject}" of ${active.newsletter.name}? It is due to be emailed ${when}. ${whoLine} ${describeWebsite(active)}.`,
+    detailedDescription:
+      `The change (${changes}) goes out in the email at the scheduled time (${when}), without anyone being asked again. ${whoLine}\n` +
+      `${update.subject !== undefined ? `New subject: ${update.subject}\n` : ""}${describeContent(after)}`,
     safetyLevel: ApprovalLevel.ReachesPeople,
     default: false,
     permission: {

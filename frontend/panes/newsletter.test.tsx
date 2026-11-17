@@ -63,6 +63,8 @@ const state = {
     supportedStatuses: string[];
   }[],
   issues: [draft, sent, scheduled] as TestIssue[],
+  optionsLoading: false,
+  optionsError: undefined as Error | undefined,
 };
 
 const audiences = [
@@ -83,7 +85,12 @@ const updateIssue = mock(async (args: { provider: string; id: string; updatedDat
 const mutateOptions = mock(async () => undefined);
 
 void mock.module("@tokenring-ai/one-frontend/rpc.ts", () => ({
-  useNewsletterOptions: () => ({ data: state.options, isLoading: false, error: undefined, mutate: mutateOptions }),
+  useNewsletterOptions: () => ({
+    data: state.optionsLoading || state.optionsError ? undefined : state.options,
+    isLoading: state.optionsLoading,
+    error: state.optionsError,
+    mutate: mutateOptions,
+  }),
   useNewsletterIssues: (provider: string | undefined) => ({
     data: provider ? { issues: state.issues.map(withoutBody) } : undefined,
     isLoading: false,
@@ -137,6 +144,8 @@ describe("Newsletters app", () => {
     for (const fn of [createIssue, updateIssue, mutateOptions]) fn.mockClear();
     state.options = [{ provider: "my-site", newsletter: { id: "weekly", name: "The Weekly" }, supportedStatuses: ["draft", "scheduled", "sent"] }];
     state.issues = [draft, sent, scheduled];
+    state.optionsLoading = false;
+    state.optionsError = undefined;
   });
 
   it("lists issues with a status badge each, and opens one as a tab", async () => {
@@ -219,8 +228,49 @@ describe("Newsletters app", () => {
     state.options = [];
     renderApp();
 
-    expect(await screen.findByText("No newsletter connected")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Ghost settings" })).toHaveAttribute("href", `/configuration/${encodeURIComponent("@tokenring-ai/ghost-io")}`);
+    expect(await screen.findAllByText("No newsletter connected")).not.toHaveLength(0);
+    expect(screen.getAllByRole("link", { name: "Ghost settings" })[0]).toHaveAttribute(
+      "href",
+      `/configuration/${encodeURIComponent("@tokenring-ai/ghost-io")}`,
+    );
     expect(screen.getAllByText(/Admin API key/).length).toBeGreaterThan(0);
+  });
+
+  it("offers no New issue button when no newsletter is connected", async () => {
+    state.options = [];
+    renderApp();
+
+    expect(await screen.findAllByText("No newsletter connected")).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /New issue/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the same explanation, not a form, on /newsletter/new with no newsletter", async () => {
+    state.options = [];
+    renderApp("/newsletter/new");
+
+    expect(await screen.findAllByText("No newsletter connected")).not.toHaveLength(0);
+    expect(screen.queryByLabelText("Subject")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Create draft/ })).not.toBeInTheDocument();
+  });
+
+  it("shows an RPC error as an error, with Retry, never as 'No newsletter connected'", async () => {
+    const user = userEvent.setup();
+    state.optionsError = new Error("backend unreachable");
+    renderApp("/newsletter/new");
+
+    expect((await screen.findAllByText(/backend unreachable/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText("No newsletter connected")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Subject")).not.toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: /Retry/ })[0] as HTMLElement);
+    expect(mutateOptions).toHaveBeenCalled();
+  });
+
+  it("shows a loading state, with no button or form, while newsletters load", async () => {
+    state.optionsLoading = true;
+    renderApp("/newsletter/new");
+
+    expect((await screen.findAllByText(/Loading/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText("No newsletter connected")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Subject")).not.toBeInTheDocument();
   });
 });

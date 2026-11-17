@@ -45,6 +45,35 @@ HTML (rendered from your Markdown) and turned back into Markdown when you read i
 byte for byte. Ghost can only record an audience for a draft through the tag, and records the real segment when the
 issue is scheduled or sent. Audience labels (for example one label's members) are not offered yet.
 
+### Verified against Ghost docs on 2026-11-16
+
+Checked against the official Admin API docs (https://docs.ghost.org/admin-api, posts, newsletters, members pages, plus the
+Content API filtering page https://docs.ghost.org/content-api/filtering) and, where the docs are silent, the Ghost source
+at tag v5.100.0 (`ghost/core/core/server/{api/endpoints/posts.js,models/post.js,models/member.js,models/tag.js}`).
+
+- Confirmed by the docs: `newsletters` browse and its `slug`/`status` (`active`|`archived`) fields (/admin-api/newsletters);
+  `limit=all`; `meta.pagination.total` exists in responses; the `newsletter` slug query parameter on publish or schedule,
+  `email_segment` as an NQL member filter with `all` (default), `status:free`, `status:-free`, and "sent if and only if an
+  active newsletter is provided" (/admin-api/posts/sending-a-post); scheduling as `status: scheduled` + future
+  `published_at` (/admin-api/posts/scheduling-a-post); `updated_at` required on every edit for collision detection
+  (/admin-api/posts/updating-a-post); `source=html` on create and edit (/admin-api/posts/creating-a-post); tags created by
+  name when unmatched, and `#name` as an internal tag; NQL `[a,b]` groups, `+` and, `:~`, quoting and `-` negation
+  (/content-api/filtering); `tag:<slug>` post filter (/content-api/filtering); member `status` values are
+  `free|paid|comped|gift` (so `status:-free` also covers comped and gift members).
+- Confirmed only in the Ghost source (docs silent): the internal tag slug is `hash-<name>` (`models/tag.js`); `tag:` expands
+  to `tags.slug` and `newsletters:` on members expands to `newsletters.slug` (`filterExpansions`); `newsletter` and
+  `email_segment` are read only when a post's status changes to published/scheduled/sent and the post has no newsletter
+  yet (`models/post.js`). Consequence, fixed in this plugin: a scheduled issue edited without a status change keeps the
+  newsletter and segment Ghost stored, so they are no longer re-sent; and the audience of a scheduled issue cannot be
+  changed by an edit, so the provider now refuses that.
+- Could not confirm (docs and the source files read are silent): that a member count filter `email_disabled:0` is accepted
+  by NQL (a rejected filter only makes the count "unknown"); that `meta.pagination.total` with `limit=1` counts the whole
+  filtered set (the docs show the field, not this use); that `status:[published,sent]` is accepted for posts (the `[ ]`
+  group is documented, `sent` as a post status is documented only for email-only posts); the exact set of members counted
+  for `status:-free`; that reverting a scheduled post to draft clears its newsletter (source says it does when no email
+  exists; not in the docs, and not used here); negating a tag-slug prefix in NQL (not documented, so the blog provider
+  filters newsletter posts after the request instead).
+
 ## Configuration
 
 ```yaml

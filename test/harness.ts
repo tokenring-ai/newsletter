@@ -7,6 +7,7 @@ import PermissionService, { MemoryPermissionStore } from "@tokenring-ai/chat/Per
 import type { ParsedChatConfig } from "@tokenring-ai/chat/schema";
 import NewsletterService from "../NewsletterService.ts";
 import { NewsletterConfigSchema } from "../schema.ts";
+import { sendPermissionId } from "../tools/support.ts";
 import TestNewsletterProvider from "./TestNewsletterProvider.ts";
 
 type Tree = { name: string; value: string }[];
@@ -56,4 +57,5 @@ export function createHarness(chatConfig: Partial<ParsedChatConfig> = { autoTool
   };
 }
 
-export const PERMISSION_ID = "newsletter.my-site-com.weekly.send";
+/** "My Site.com" is not a plain segment, so its slug carries a hash. */
+export const PERMISSION_ID = sendPermissionId("My Site.com", "weekly");

@@ -3,6 +3,7 @@ import { ALWAYS_ALLOW_VALUE } from "@tokenring-ai/agent/question";
 import { createHarness, PERMISSION_ID } from "../test/harness.ts";
 import scheduleIssue from "./scheduleIssue.ts";
 import sendIssue from "./sendIssue.ts";
+import { sendPermissionId } from "./support.ts";
 
 const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
@@ -18,8 +19,43 @@ describe("newsletter_sendIssue", () => {
     expect(prompt).toContain("Hello subscribers");
     expect(prompt).toContain("Everyone subscribed");
     expect(prompt).toContain("This will email about 1,204 people");
+    expect(prompt).toContain("ALSO be published on the website");
+    expect(prompt).toContain("Preheader:");
+    expect(prompt).toContain("Body starts: Welcome to the first issue.");
     expect(provider.delivered).toEqual([{ kind: "send", id: "draft-1", audience: "all" }]);
     expect(result.result).toContain("cannot be recalled");
+  });
+
+  it("says plainly when it is emailed only, and when the provider cannot say", async () => {
+    const { agent, provider, questions, answerWith } = createHarness();
+    answerWith("Approved");
+    provider.publishesOnWebsite = false;
+    await sendIssue.execute({ id: "draft-1", audience: "all" }, agent);
+    expect(questions[0]?.message).toContain("emailed only; it will NOT be published on the website");
+    const second = await provider.createIssue({ newsletter: "weekly", subject: "Two", markdown: "x" });
+    provider.publishesOnWebsite = undefined;
+    await sendIssue.execute({ id: second.id, audience: "all" }, agent);
+    expect(questions[1]?.message).toContain("not known, so check before approving");
+  });
+
+  it("shows the preheader and a plain-text excerpt of the body, cut at about 300 characters with an ellipsis", async () => {
+    const { agent, provider, questions, answerWith } = createHarness();
+    answerWith("Approved");
+    const long = await provider.createIssue({
+      newsletter: "weekly",
+      subject: "Long one",
+      preheader: "A short teaser",
+      markdown: `## Heading\n\nSome **bold** text with a [link](https://example.com/secret-path) and more. ${"word ".repeat(100)}`,
+    });
+    await sendIssue.execute({ id: long.id, audience: "all" }, agent);
+    const prompt = questions[0]?.message ?? "";
+    expect(prompt).toContain("Preheader: A short teaser");
+    expect(prompt).toContain("Body starts: Heading Some bold text with a link and more. word word");
+    expect(prompt).not.toContain("secret-path");
+    expect(prompt).not.toContain("**bold**");
+    const excerpt = prompt.split("Body starts: ")[1]!.split("\n")[0]!;
+    expect(excerpt.length).toBeLessThanOrEqual(301);
+    expect(excerpt.endsWith("…")).toBe(true);
   });
 
   it("offers Always allow for this newsletter, and a recorded grant sends without asking next time", async () => {
@@ -38,7 +74,7 @@ describe("newsletter_sendIssue", () => {
   it("a grant for another newsletter or site does not cover this one", async () => {
     const { agent, provider, permissions, questions, answerWith } = createHarness();
     await permissions.grant({ id: "newsletter.other-site.weekly.send" });
-    await permissions.grant({ id: "newsletter.my-site-com.daily.send" });
+    await permissions.grant({ id: sendPermissionId("My Site.com", "daily") });
     answerWith("Not approved");
     await expect(sendIssue.execute({ id: "draft-1", audience: "all" }, agent)).rejects.toThrow(/did not approve/);
     expect(questions).toHaveLength(1);
@@ -170,7 +206,11 @@ describe("newsletter_scheduleIssue", () => {
 
   it("rejects bad times, a provider that cannot schedule, and sent issues before asking", async () => {
     const { agent, provider, questions } = createHarness();
-    await expect(scheduleIssue.execute({ id: "draft-1", sendAt: "next friday", audience: "all" }, agent)).rejects.toThrow(/not a date/);
+    await expect(scheduleIssue.execute({ id: "draft-1", sendAt: "next friday", audience: "all" }, agent)).rejects.toThrow(/not a real date/);
+    // No offset: the server's zone would silently decide the moment. Impossible dates are refused too.
+    await expect(scheduleIssue.execute({ id: "draft-1", sendAt: "2099-01-01T09:00:00", audience: "all" }, agent)).rejects.toThrow(/not a real date/);
+    await expect(scheduleIssue.execute({ id: "draft-1", sendAt: "2099-02-31T09:00:00Z", audience: "all" }, agent)).rejects.toThrow(/not a real date/);
+    expect(questions).toHaveLength(0);
     await expect(scheduleIssue.execute({ id: "draft-1", sendAt: new Date(Date.now() - 60_000).toISOString(), audience: "all" }, agent)).rejects.toThrow(
       /future/,
     );
